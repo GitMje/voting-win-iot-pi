@@ -1,9 +1,12 @@
-﻿//using MetroLog;
-//using MetroLog.Targets;
-using System;
+﻿using System;
+using System.IO;
+using System.Net.Http;
+using System.Runtime.Serialization.Json;
+using System.Text;
+using System.Threading.Tasks;
+using VoteApp.LogEvents;
 using Windows.Devices.Gpio;
 using Windows.UI.Core;
-using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Media;
 
@@ -13,22 +16,6 @@ namespace PushButton
     {
         public MainPage()
         {
-//            var configuration = new LoggingConfiguration();
-//#if DEBUG
-//            configuration.AddTarget(LogLevel.Trace, LogLevel.Fatal, new DebugTarget());
-//#endif
-//            configuration.AddTarget(LogLevel.Trace, LogLevel.Fatal, new StreamingFileTarget());
-//            configuration.IsEnabled = true;
-
-//            LogManagerFactory.DefaultConfiguration = configuration;
-
-//            logger.Trace("Sample MetroLog Trace Message");
-//            logger.Debug("Sample MetroLog Debug Message");
-//            logger.Info("Sample MetroLog Info Message");
-//            logger.Warn("Sample MetroLog Warn Message");
-//            logger.Error("Sample MetroLog Error Message");
-//            logger.Fatal("Sample MetroLog Fatal Message");
-
             InitializeComponent();
             InitGPIO();
         }
@@ -45,11 +32,12 @@ namespace PushButton
             }
 
             buttonPin = gpio.OpenPin(BUTTON_PIN);
+
             ledPin = gpio.OpenPin(LED_PIN);
 
             // Initialize LED to the OFF state by first writing a HIGH value
             // We write HIGH because the LED is wired in a active LOW configuration
-            ledPin.Write(GpioPinValue.High); 
+            ledPin.Write(GpioPinValue.High);
             ledPin.SetDriveMode(GpioPinDriveMode.Output);
 
             // Check if input pull-up resistors are supported
@@ -83,15 +71,44 @@ namespace PushButton
             var task = Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () => {
                 if (e.Edge == GpioPinEdge.FallingEdge)
                 {
-                    ledEllipse.Fill = (ledPinValue == GpioPinValue.Low) ? 
+                    ledEllipse.Fill = (ledPinValue == GpioPinValue.Low) ?
                         redBrush : grayBrush;
-                    GpioStatus.Text = "Button Pressed - Thank you for your vote!";
+                    GpioStatus.Text = "Button Pressed";
                 }
                 else
                 {
-                    GpioStatus.Text = "Button Released";
+                    GpioStatus.Text = "starting task";
+                    var data = LogEventFactory.Get(sender.PinNumber);
+                    Task.Run(() => PostToSumoAsync(data));
+                    GpioStatus.Text = $"Button released: {data.message}";
                 }
             });
+        }
+
+
+
+        private async Task<string> PostToSumoAsync(LogEvent data)
+        {
+            var stream = new MemoryStream();
+            var ser = new DataContractJsonSerializer(typeof(LogEvent));
+            ser.WriteObject(stream, data);
+
+            stream.Position = 0;
+            var sr = new StreamReader(stream);
+            var content = new StringContent(sr.ReadToEnd(), Encoding.UTF8, "application/json");
+
+            var response = await _client.PostAsync("THE_URL"
+                , content);
+            var responseString = await response.Content.ReadAsStringAsync();
+            return responseString;
+            //if (response.IsSuccessStatusCode)
+            //{
+            //    return true;
+            //}
+            //else
+            //{
+            //    return false;
+            //}
         }
 
         private const int LED_PIN = 6;
@@ -101,5 +118,7 @@ namespace PushButton
         private GpioPinValue ledPinValue = GpioPinValue.High;
         private SolidColorBrush redBrush = new SolidColorBrush(Windows.UI.Colors.Red);
         private SolidColorBrush grayBrush = new SolidColorBrush(Windows.UI.Colors.LightGray);
-    }
+        private static readonly HttpClient _client = new HttpClient();
+    } 
 }
+
